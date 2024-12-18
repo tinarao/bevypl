@@ -1,74 +1,146 @@
-use bevy::prelude::*;
-use player::Player;
-use tiles::Collider;
+use bevy::{prelude::*, window::WindowResolution};
 
-mod player;
-mod tiles;
+enum GameState {
+    Running,
+    Failed,
+    Pause,
+}
+
+#[derive(Component)]
+struct Ball;
+
+#[derive(Component)]
+struct Paddle;
+
+#[derive(Component)]
+struct Debug;
+
+#[derive(Resource)]
+struct State {
+    current_state: GameState,
+}
+
+impl State {
+    fn to_string(&self) -> String {
+        let state_string = match self.current_state {
+            GameState::Failed => "failed",
+            GameState::Pause => "paused",
+            GameState::Running => "running",
+        };
+
+        String::from(state_string)
+    }
+}
+
+const PADDLE_SPEED: f32 = 300.;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
-        .add_systems(Startup, (camera_setup, player_setup, world_setup))
-        .add_systems(Update, update_player)
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                resizable: false,
+                resolution: WindowResolution::new(720., 360.).with_scale_factor_override(1.0),
+                ..default()
+            }),
+            ..default()
+        }))
+        .insert_resource(State {
+            current_state: GameState::Pause,
+        })
+        .add_systems(Startup, setup)
+        .add_systems(Update, (move_paddle, update_game_state))
         .run();
 }
 
-fn camera_setup(mut commands: Commands) {
-    commands.spawn(Camera2d);
-}
-
-fn player_setup(
-    mut commands: Commands,
+fn setup(
+    mut cmd: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     window: Query<&Window>,
+    state: Res<State>,
 ) {
-    let circle = Circle::new(32.);
-    let color = Color::srgb(255., 0., 0.);
+    cmd.spawn(Camera2d);
 
-    let circlemesh = meshes.add(circle);
-    commands.spawn((
-        Mesh2d(circlemesh),
-        MeshMaterial2d(materials.add(color)),
+    let ball_rect = Circle::new(8.);
+    let paddle_rect = Rectangle::new(96., 8.);
+    let ball = meshes.add(ball_rect);
+    let paddle: Handle<Mesh> = meshes.add(paddle_rect);
+
+    let ball_color = Color::srgb(255., 133., 196.);
+    let paddle_color = Color::srgb(128., 215., 255.);
+
+    cmd.spawn((
+        Mesh2d(paddle),
+        MeshMaterial2d(materials.add(ball_color)),
         Transform::from_xyz(
-            -circle.radius / 2.,
-            -(window.single().resolution.height() / 2.) + 48. + circle.radius / 2.,
+            -ball_rect.radius,
+            -(window.single().height() / 2.) + ball_rect.radius * 2. + ball_rect.radius,
             0.,
         ),
-        Player::new(),
+        Paddle,
     ));
+
+    cmd.spawn((
+        Mesh2d(ball),
+        MeshMaterial2d(materials.add(paddle_color)),
+        Transform::default(),
+        Ball,
+    ));
+
+    let str = format!("State: {}", state.to_string());
+    cmd.spawn((Text::new(str), Transform::from_xyz(-450., 150., 0.), Debug));
 }
 
-fn world_setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-) {
-    let square = Rectangle::new(300., 8.);
-    let color = Color::srgb(0., 255., 0.);
-
-    let rect = meshes.add(square);
-    commands.spawn((
-        Mesh2d(rect),
-        MeshMaterial2d(materials.add(color)),
-        Transform::from_xyz(-400., 0., 0.),
-        Collider::new(),
-    ));
+fn create_world() {
+    // 8
 }
 
-// Updates
+//
 
-fn update_player(
-    mut q: Query<(&Player, &mut Transform)>,
+fn update_game_state(
     keys: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
+    mut state: ResMut<State>,
+    mut debug_track: Query<(&mut Text, &Debug)>,
 ) {
-    let (pl, mut transform) = q.single_mut();
-
-    if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
-        transform.translation.x -= 1. * pl.speed * time.delta_secs();
+    if keys.just_pressed(KeyCode::Space) {
+        match state.current_state {
+            GameState::Pause => state.current_state = GameState::Running,
+            GameState::Running => state.current_state = GameState::Pause,
+            _ => {}
+        }
     }
-    if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
-        transform.translation.x += 1. * pl.speed * time.delta_secs();
+
+    let (mut dbg_text, _) = debug_track.single_mut();
+
+    dbg_text.0 = format!("State: {}", state.to_string());
+}
+
+fn move_paddle(
+    mut q: Query<(&Paddle, &mut Transform)>,
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    state: Res<State>,
+) {
+    let (_p, mut transform) = q.single_mut();
+
+    match state.current_state {
+        GameState::Running => {
+            if keys.pressed(KeyCode::KeyA) {
+                transform.translation.x -= PADDLE_SPEED * time.delta_secs();
+            }
+            if keys.pressed(KeyCode::KeyD) {
+                transform.translation.x += PADDLE_SPEED * time.delta_secs();
+            }
+        }
+        _ => {}
     }
 }
+
+// fn update_ball(mut b: Query<(&Ball, &mut Transform)>, state: Res<State>) {
+//     let (_, mut transform) = b.single_mut();
+
+//     match state.current_state {
+//         GameState::Running => {}
+//         _ => {}
+//     }
+// }
